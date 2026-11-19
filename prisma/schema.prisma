@@ -1,0 +1,262 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum Platform {
+  AMAZON
+  NOON
+  SALLA
+  TRENDYOL
+}
+
+enum ConnectionStatus {
+  DISCONNECTED
+  CONNECTED
+  ERROR
+}
+
+enum GenerationType {
+  TITLE
+  DESCRIPTION
+  SEO
+  IMAGE_GENERATION
+  IMAGE_EDIT
+}
+
+model User {
+  id              String            @id @default(cuid())
+  name            String?
+  email           String            @unique
+  emailVerified   DateTime?
+  passwordHash    String?
+  image           String?
+  avatar          String?
+  language        String            @default("ar")
+  sessionVersion  Int               @default(0)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  accounts        Account[]
+  sessions        Session[]
+  ownedWorkspaces Workspace[]
+  memberships     WorkspaceMember[]
+  activities      ActivityLog[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Workspace {
+  id          String                  @id @default(cuid())
+  name        String
+  slug        String                  @unique
+  logo        String?
+  logoKey     String?
+  ownerId     String
+  owner       User                    @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  members     WorkspaceMember[]
+  products    Product[]
+  categories  Category[]
+  generations AIContentGeneration[]
+  connections MarketplaceConnection[]
+  activities  ActivityLog[]
+
+  @@index([ownerId])
+}
+
+model WorkspaceMember {
+  id          String    @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        Role      @default(MEMBER)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model Product {
+  id             String                @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name           String
+  description    String                @default("") @db.Text
+  sku            String?
+  barcode        String?
+  categoryId     String?
+  category       Category?             @relation(fields: [categoryId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction)
+  price          Decimal               @db.Decimal(14, 2)
+  compareAtPrice Decimal?              @db.Decimal(14, 2)
+  currency       String                @default("SAR")
+  stock          Int                   @default(0)
+  weight         Decimal?              @db.Decimal(12, 3)
+  dimensions     Json?
+  status         ProductStatus         @default(DRAFT)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  images         ProductImage[]
+  generations    AIContentGeneration[]
+  listings       MarketplaceListing[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, sku])
+  @@index([workspaceId, status, createdAt])
+  @@index([categoryId, workspaceId])
+}
+
+model ProductImage {
+  id         String   @id @default(cuid())
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url        String
+  storageKey String   @unique
+  isPrimary  Boolean  @default(false)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@index([productId, sortOrder])
+}
+
+model Category {
+  id          String     @id @default(cuid())
+  workspaceId String
+  workspace   Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  slug        String
+  parentId    String?
+  parent      Category?  @relation("CategoryTree", fields: [parentId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction)
+  children    Category[] @relation("CategoryTree")
+  products    Product[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, slug])
+  @@index([parentId, workspaceId])
+}
+
+model AIContentGeneration {
+  id             String         @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  productId      String?
+  product        Product?       @relation(fields: [productId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction)
+  generationType GenerationType
+  prompt         String         @db.Text
+  result         String         @db.Text
+  model          String
+  tokenUsage     Int            @default(0)
+  estimatedCost  Decimal        @db.Decimal(12, 6)
+  createdAt      DateTime       @default(now())
+
+  @@index([workspaceId, createdAt])
+  @@index([productId, workspaceId])
+}
+
+model MarketplaceConnection {
+  id                   String               @id @default(cuid())
+  workspaceId          String
+  workspace            Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  platform             Platform
+  accountName          String?
+  externalAccountId    String?
+  status               ConnectionStatus     @default(DISCONNECTED)
+  encryptedCredentials String?              @db.Text
+  connectedAt          DateTime?
+  updatedAt            DateTime             @updatedAt
+  listings             MarketplaceListing[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, platform, externalAccountId])
+}
+
+model MarketplaceListing {
+  id                      String                @id @default(cuid())
+  workspaceId             String
+  productId               String
+  marketplaceConnectionId String
+  product                 Product               @relation(fields: [productId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  connection              MarketplaceConnection @relation(fields: [marketplaceConnectionId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  externalListingId       String?
+  externalSku             String?
+  status                  String                @default("UNPUBLISHED")
+  lastSyncedAt            DateTime?
+  errorMessage            String?
+
+  @@unique([productId, marketplaceConnectionId])
+  @@index([workspaceId])
+  @@index([marketplaceConnectionId, workspaceId])
+}
+
+model ActivityLog {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String?
+  user        User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action      String
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId, createdAt])
+  @@index([userId])
+}
+
+model RateLimit {
+  key     String   @id
+  count   Int      @default(1)
+  resetAt DateTime
+
+  @@index([resetAt])
+}
